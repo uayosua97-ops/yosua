@@ -1,0 +1,333 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Multi-tenant company profile, Google Spreadsheet connection settings, and operational defaults.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "spreadsheetId": { "type": "string" },
+        "appsScriptUrl": { "type": "string" },
+        "connectionStatus": { "type": "string", "enum": ["CONNECTED", "DISCONNECTED", "PENDING"] },
+        "subscriptionPlan": { "type": "string", "enum": ["STARTER", "ENTERPRISE", "CUSTOM"] },
+        "isActive": { "type": "boolean" },
+        "shrinkageTolerancePct": { "type": "number" },
+        "defaultRatePerTon": { "type": "number" },
+        "ownerUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "code", "connectionStatus", "subscriptionPlan", "isActive", "shrinkageTolerancePct", "defaultRatePerTon", "ownerUid", "createdAt"]
+    },
+    "CompanyUser": {
+      "title": "CompanyUser",
+      "description": "Tenant-bound user account profile with strict RBAC role assignment.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "companyId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "SPV", "KARYAWAN"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "lastLoginAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "companyId", "companyName", "name", "email", "role", "status", "createdAt"]
+    },
+    "CompanyInvite": {
+      "title": "CompanyInvite",
+      "description": "Pre-authorized invitation binding a Google email to a company tenant and role.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "companyId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "role": { "type": "string", "enum": ["SPV", "KARYAWAN"] },
+        "status": { "type": "string", "enum": ["PENDING", "ACCEPTED", "REVOKED"] },
+        "invitedByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "companyId", "companyName", "role", "status", "invitedByUid", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Palm oil mill / refinery customer per company tenant.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "picName": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "loadingLocation": { "type": "string" },
+        "unloadingLocation": { "type": "string" },
+        "defaultPricePerTon": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "name", "code", "isActive", "createdByUid", "createdAt"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "CPO tanker fleet vehicle with STNK, KIR, capacity, and roadworthiness metadata.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "capacityTons": { "type": "number" },
+        "ownerName": { "type": "string" },
+        "status": { "type": "string", "enum": ["AVAILABLE", "IN_USE", "MAINTENANCE", "INACTIVE"] },
+        "stnkExpiry": { "type": "string" },
+        "kirExpiry": { "type": "string" },
+        "lastServiceDate": { "type": "string" },
+        "isRoadworthy": { "type": "boolean" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "plateNumber", "vehicleType", "capacityTons", "status", "isRoadworthy", "createdByUid", "createdAt"]
+    },
+    "Driver": {
+      "title": "Driver",
+      "description": "CPO fleet driver profile, license expiry, and assigned tanker vehicle.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "nik": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "simNumber": { "type": "string" },
+        "simExpiry": { "type": "string" },
+        "assignedVehicleId": { "type": "string" },
+        "assignedPlate": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "ON_TRIP", "INACTIVE"] },
+        "totalTrips": { "type": "integer" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "fullName", "phone", "simNumber", "status", "totalTrips", "createdByUid", "createdAt"]
+    },
+    "Shipment": {
+      "title": "Shipment",
+      "description": "CPO Delivery Order & Surat Jalan tracking through 10 operational stages.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "suratJalanNumber": { "type": "string" },
+        "shipmentDate": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "loadingLocation": { "type": "string" },
+        "unloadingLocation": { "type": "string" },
+        "senderCompany": { "type": "string" },
+        "receiverCompany": { "type": "string" },
+        "productType": { "type": "string" },
+        "targetTonnage": { "type": "number" },
+        "pricePerTon": { "type": "number" },
+        "totalContractValue": { "type": "number" },
+        "vehicleId": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "PENDING_APPROVAL", "READY_TO_LOAD", "LOADING", "IN_TRANSIT", "ARRIVED", "UNLOADING", "COMPLETED", "ISSUE", "CANCELLED"]
+        },
+        "etaText": { "type": "string" },
+        "notes": { "type": "string" },
+        "statusHistory": { "type": "array" },
+        "approvedByUid": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "doNumber", "suratJalanNumber", "shipmentDate", "customerName", "loadingLocation", "unloadingLocation", "productType", "targetTonnage", "pricePerTon", "status", "createdByUid", "createdAt"]
+    },
+    "WeighingRecord": {
+      "title": "WeighingRecord",
+      "description": "Weighbridge tonnage record calculating shrinkage tolerance and billable CPO weight.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "shipmentId": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "loadTicketNumber": { "type": "string" },
+        "unloadTicketNumber": { "type": "string" },
+        "loadTonnage": { "type": "number" },
+        "unloadTonnage": { "type": "number" },
+        "differenceTonnage": { "type": "number" },
+        "tolerancePct": { "type": "number" },
+        "toleranceTons": { "type": "number" },
+        "billableTonnage": { "type": "number" },
+        "pricePerTon": { "type": "number" },
+        "totalDeliveryValue": { "type": "number" },
+        "isOverShrinkage": { "type": "boolean" },
+        "recordedByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "shipmentId", "doNumber", "loadTicketNumber", "loadTonnage", "unloadTonnage", "billableTonnage", "pricePerTon", "totalDeliveryValue", "recordedByUid", "createdAt"]
+    },
+    "OperationalCost": {
+      "title": "OperationalCost",
+      "description": "Trip operational expenses, driver salary/kasbon, gross & net income per shipment.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "shipmentId": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "fuelCost": { "type": "number" },
+        "tollCost": { "type": "number" },
+        "loadingUnloadingCost": { "type": "number" },
+        "serviceCost": { "type": "number" },
+        "tripAllowance": { "type": "number" },
+        "driverSalary": { "type": "number" },
+        "driverCashAdvance": { "type": "number" },
+        "additionalCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "revenue": { "type": "number" },
+        "grossIncome": { "type": "number" },
+        "netIncome": { "type": "number" },
+        "approvalStatus": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "approvedByUid": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "shipmentId", "doNumber", "totalCost", "revenue", "grossIncome", "netIncome", "approvalStatus", "createdByUid", "createdAt"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Customer billing & payment tracking derived from billable CPO tonnage.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "shipmentId": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "billableTonnage": { "type": "number" },
+        "pricePerTon": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PARTIAL", "PAID"] },
+        "dueDate": { "type": "string" },
+        "lastPaymentDate": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "invoiceNumber", "shipmentId", "customerName", "totalAmount", "paidAmount", "paymentStatus", "createdByUid", "createdAt"]
+    },
+    "MaintenanceRecord": {
+      "title": "MaintenanceRecord",
+      "description": "Fleet vehicle service and repair log.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "serviceDate": { "type": "string" },
+        "cost": { "type": "number" },
+        "workshopName": { "type": "string" },
+        "notes": { "type": "string" },
+        "nextServiceDate": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "vehicleId", "vehiclePlate", "serviceType", "serviceDate", "cost", "createdByUid", "createdAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Immutable operational & security audit trail.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "actorUid": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "actorUid", "actorName", "actorRole", "action", "module", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Company tenant registry and spreadsheet connection config."
+    },
+    "/company_users/{uid}": {
+      "schema": { "$ref": "#/entities/CompanyUser" },
+      "description": "User profiles binding UID to a single companyId and RBAC role."
+    },
+    "/company_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/CompanyInvite" },
+      "description": "Tenant invitations for SPV and Karyawan onboarding."
+    },
+    "/super_admin_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Super Admin platform audit trail."
+    },
+    "/companies/{companyId}/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Company-isolated customers."
+    },
+    "/companies/{companyId}/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Company-isolated tanker fleet."
+    },
+    "/companies/{companyId}/drivers/{driverId}": {
+      "schema": { "$ref": "#/entities/Driver" },
+      "description": "Company-isolated drivers."
+    },
+    "/companies/{companyId}/shipments/{shipmentId}": {
+      "schema": { "$ref": "#/entities/Shipment" },
+      "description": "Company-isolated CPO shipments & Delivery Orders."
+    },
+    "/companies/{companyId}/weighings/{weighingId}": {
+      "schema": { "$ref": "#/entities/WeighingRecord" },
+      "description": "Company-isolated weighbridge tonnage records."
+    },
+    "/companies/{companyId}/operational_costs/{costId}": {
+      "schema": { "$ref": "#/entities/OperationalCost" },
+      "description": "Company-isolated operational expenses and P&L."
+    },
+    "/companies/{companyId}/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/Invoice" },
+      "description": "Company-isolated customer invoices and payments."
+    },
+    "/companies/{companyId}/maintenance/{maintenanceId}": {
+      "schema": { "$ref": "#/entities/MaintenanceRecord" },
+      "description": "Company-isolated vehicle maintenance history."
+    },
+    "/companies/{companyId}/activity_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Company-isolated operational audit trail."
+    }
+  }
+}

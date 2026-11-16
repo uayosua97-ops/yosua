@@ -1,0 +1,663 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL PRIMITIVE HELPERS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOptString(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isReqString(data, key, minLen, maxLen) {
+      return (key in data) && data[key] is string && data[key].size() >= minLen && data[key].size() <= maxLen;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function tokenEmailLower() {
+      return ('email' in request.auth.token && request.auth.token.email is string)
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    function isEmailVerified() {
+      return ('email_verified' in request.auth.token) && request.auth.token.email_verified == true;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/super_admins/$(request.auth.uid)) ||
+        (tokenEmailLower() == 'ua.yosua97@gmail.com' && isEmailVerified())
+      );
+    }
+
+    function hasCompanyUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/company_users/$(request.auth.uid));
+    }
+
+    function callerUser() {
+      return get(/databases/$(database)/documents/company_users/$(request.auth.uid)).data;
+    }
+
+    function isActiveCompanyMember(companyId) {
+      return hasCompanyUserDoc() &&
+             callerUser().companyId == companyId &&
+             callerUser().status == 'ACTIVE' &&
+             exists(/databases/$(database)/documents/companies/$(companyId)) &&
+             get(/databases/$(database)/documents/companies/$(companyId)).data.isActive == true;
+    }
+
+    function isCompanySpv(companyId) {
+      return isActiveCompanyMember(companyId) && callerUser().role == 'SPV';
+    }
+
+    function isCompanyStaff(companyId) {
+      return isActiveCompanyMember(companyId) && callerUser().role in ['SPV', 'KARYAWAN'];
+    }
+
+    // --- VALIDATION HELPERS ---
+    function isValidCompany(data) {
+      return isReqString(data, 'name', 2, 120) &&
+             isReqString(data, 'code', 2, 24) &&
+             isOptString(data, 'address', 240) &&
+             isOptString(data, 'phone', 40) &&
+             isOptString(data, 'email', 120) &&
+             isOptString(data, 'spreadsheetId', 180) &&
+             isOptString(data, 'appsScriptUrl', 300) &&
+             data.connectionStatus in ['CONNECTED', 'DISCONNECTED', 'PENDING'] &&
+             data.subscriptionPlan in ['STARTER', 'ENTERPRISE', 'CUSTOM'] &&
+             data.isActive is bool &&
+             data.shrinkageTolerancePct is number && data.shrinkageTolerancePct >= 0 && data.shrinkageTolerancePct <= 10 &&
+             data.defaultRatePerTon is number && data.defaultRatePerTon >= 0 &&
+             isReqString(data, 'ownerUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidCompanyUser(data) {
+      return isReqString(data, 'userId', 1, 128) &&
+             isReqString(data, 'companyId', 1, 128) &&
+             isReqString(data, 'companyName', 1, 120) &&
+             isReqString(data, 'name', 1, 120) &&
+             isReqString(data, 'email', 3, 160) &&
+             data.role in ['SUPER_ADMIN', 'SPV', 'KARYAWAN'] &&
+             data.status in ['ACTIVE', 'INACTIVE'] &&
+             isOptString(data, 'inviteId', 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('lastLoginAt' in data) || data.lastLoginAt == null || isValidTimestamp(data.lastLoginAt)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidCompanyInvite(data) {
+      return isReqString(data, 'email', 3, 160) &&
+             isReqString(data, 'companyId', 1, 128) &&
+             isReqString(data, 'companyName', 1, 120) &&
+             data.role in ['SPV', 'KARYAWAN'] &&
+             data.status in ['PENDING', 'ACCEPTED', 'REVOKED'] &&
+             isReqString(data, 'invitedByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidCustomer(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'name', 2, 120) &&
+             isReqString(data, 'code', 1, 32) &&
+             isOptString(data, 'picName', 100) &&
+             isOptString(data, 'phone', 40) &&
+             isOptString(data, 'address', 240) &&
+             isOptString(data, 'loadingLocation', 160) &&
+             isOptString(data, 'unloadingLocation', 160) &&
+             (!('defaultPricePerTon' in data) || data.defaultPricePerTon == null || (data.defaultPricePerTon is number && data.defaultPricePerTon >= 0)) &&
+             data.isActive is bool &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidVehicle(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'plateNumber', 3, 24) &&
+             isReqString(data, 'vehicleType', 2, 64) &&
+             data.capacityTons is number && data.capacityTons > 0 && data.capacityTons <= 200 &&
+             isOptString(data, 'ownerName', 120) &&
+             data.status in ['AVAILABLE', 'IN_USE', 'MAINTENANCE', 'INACTIVE'] &&
+             isOptString(data, 'stnkExpiry', 32) &&
+             isOptString(data, 'kirExpiry', 32) &&
+             isOptString(data, 'lastServiceDate', 32) &&
+             data.isRoadworthy is bool &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidDriver(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'fullName', 2, 120) &&
+             isOptString(data, 'nik', 32) &&
+             isReqString(data, 'phone', 5, 40) &&
+             isOptString(data, 'address', 240) &&
+             isReqString(data, 'simNumber', 3, 40) &&
+             isOptString(data, 'simExpiry', 32) &&
+             isOptString(data, 'assignedVehicleId', 128) &&
+             isOptString(data, 'assignedPlate', 24) &&
+             data.status in ['ACTIVE', 'ON_TRIP', 'INACTIVE'] &&
+             data.totalTrips is int && data.totalTrips >= 0 &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidShipment(data, companyId) {
+      return data.companyId == companyId &&
+             data.doNumber is string && data.doNumber.size() >= 2 && data.doNumber.size() <= 48 &&
+             data.suratJalanNumber is string && data.suratJalanNumber.size() >= 2 && data.suratJalanNumber.size() <= 48 &&
+             data.shipmentDate is string && data.shipmentDate.size() >= 4 && data.shipmentDate.size() <= 32 &&
+             data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 120 &&
+             data.loadingLocation is string && data.loadingLocation.size() >= 2 && data.loadingLocation.size() <= 160 &&
+             data.unloadingLocation is string && data.unloadingLocation.size() >= 2 && data.unloadingLocation.size() <= 160 &&
+             data.productType is string && data.productType.size() >= 2 && data.productType.size() <= 80 &&
+             data.targetTonnage is number && data.targetTonnage > 0 && data.targetTonnage <= 500 &&
+             data.pricePerTon is number && data.pricePerTon >= 0 &&
+             data.status in ['DRAFT', 'PENDING_APPROVAL', 'READY_TO_LOAD', 'LOADING', 'IN_TRANSIT', 'ARRIVED', 'UNLOADING', 'COMPLETED', 'ISSUE', 'CANCELLED'] &&
+             data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+             isValidTimestamp(data.createdAt) &&
+             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500)) &&
+             (!('statusHistory' in data) || (data.statusHistory is list && data.statusHistory.size() <= 30 && (data.statusHistory.size() == 0 || data.statusHistory[0] is string))) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidWeighing(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'shipmentId', 1, 128) &&
+             isReqString(data, 'doNumber', 2, 48) &&
+             isReqString(data, 'loadTicketNumber', 1, 64) &&
+             isOptString(data, 'unloadTicketNumber', 64) &&
+             data.loadTonnage is number && data.loadTonnage >= 0 && data.loadTonnage <= 500 &&
+             data.unloadTonnage is number && data.unloadTonnage >= 0 && data.unloadTonnage <= 500 &&
+             data.differenceTonnage is number &&
+             data.tolerancePct is number && data.tolerancePct >= 0 && data.tolerancePct <= 10 &&
+             data.toleranceTons is number && data.toleranceTons >= 0 &&
+             data.billableTonnage is number && data.billableTonnage >= 0 &&
+             data.pricePerTon is number && data.pricePerTon >= 0 &&
+             data.totalDeliveryValue is number && data.totalDeliveryValue >= 0 &&
+             data.isOverShrinkage is bool &&
+             isReqString(data, 'recordedByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidOperationalCost(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'shipmentId', 1, 128) &&
+             isReqString(data, 'doNumber', 2, 48) &&
+             data.fuelCost is number && data.fuelCost >= 0 &&
+             data.tollCost is number && data.tollCost >= 0 &&
+             data.loadingUnloadingCost is number && data.loadingUnloadingCost >= 0 &&
+             data.serviceCost is number && data.serviceCost >= 0 &&
+             data.tripAllowance is number && data.tripAllowance >= 0 &&
+             data.driverSalary is number && data.driverSalary >= 0 &&
+             data.driverCashAdvance is number && data.driverCashAdvance >= 0 &&
+             data.additionalCost is number && data.additionalCost >= 0 &&
+             data.totalCost is number && data.totalCost >= 0 &&
+             data.revenue is number && data.revenue >= 0 &&
+             data.grossIncome is number &&
+             data.netIncome is number &&
+             data.approvalStatus in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             isOptString(data, 'approvedByUid', 128) &&
+             isOptString(data, 'notes', 500) &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidInvoice(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'invoiceNumber', 2, 48) &&
+             isReqString(data, 'shipmentId', 1, 128) &&
+             isOptString(data, 'doNumber', 48) &&
+             isOptString(data, 'customerId', 128) &&
+             isReqString(data, 'customerName', 2, 120) &&
+             data.billableTonnage is number && data.billableTonnage >= 0 &&
+             data.pricePerTon is number && data.pricePerTon >= 0 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.paidAmount is number && data.paidAmount >= 0 && data.paidAmount <= data.totalAmount &&
+             data.paymentStatus in ['UNPAID', 'PARTIAL', 'PAID'] &&
+             isOptString(data, 'dueDate', 32) &&
+             isOptString(data, 'lastPaymentDate', 32) &&
+             isOptString(data, 'paymentMethod', 64) &&
+             isOptString(data, 'notes', 500) &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidMaintenance(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'vehicleId', 1, 128) &&
+             isReqString(data, 'vehiclePlate', 2, 24) &&
+             isReqString(data, 'serviceType', 2, 120) &&
+             isReqString(data, 'serviceDate', 4, 32) &&
+             data.cost is number && data.cost >= 0 &&
+             isOptString(data, 'workshopName', 120) &&
+             isOptString(data, 'notes', 500) &&
+             isOptString(data, 'nextServiceDate', 32) &&
+             isReqString(data, 'createdByUid', 1, 128) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidActivityLog(data, companyId) {
+      return data.companyId == companyId &&
+             isReqString(data, 'actorUid', 1, 128) &&
+             isReqString(data, 'actorName', 1, 120) &&
+             isReqString(data, 'actorRole', 1, 32) &&
+             isReqString(data, 'action', 2, 120) &&
+             isReqString(data, 'module', 2, 64) &&
+             isOptString(data, 'targetId', 128) &&
+             isOptString(data, 'details', 500) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    // --- SUPER ADMIN REGISTRY (Read-only from client; seeded or managed by Super Admin) ---
+    match /super_admins/{uid} {
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
+    // --- SUPER ADMIN AUDIT LOGS (Append-only) ---
+    match /super_admin_logs/{logId} {
+      allow get, list: if isSuperAdmin();
+      allow create: if isSuperAdmin() &&
+                       isValidId(logId) &&
+                       isValidActivityLog(incoming(), 'platform') &&
+                       incoming().actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // --- COMPANIES (TENANT REGISTRY & SPREADSHEET SETTINGS) ---
+    match /companies/{companyId} {
+      // Super Admin sees all companies; active members can read ONLY their own company
+      allow get: if isSuperAdmin() ||
+                    (isSignedIn() && hasCompanyUserDoc() && callerUser().companyId == companyId);
+      allow list: if isSuperAdmin() ||
+                     (isSignedIn() && hasCompanyUserDoc() && resource.id == callerUser().companyId);
+
+      // Super Admin creates any company OR an authenticated user creates a new workspace they own
+      allow create: if isSignedIn() &&
+                       isValidId(companyId) &&
+                       isValidCompany(incoming()) && (
+                         isSuperAdmin() ||
+                         (incoming().ownerUid == request.auth.uid && !hasCompanyUserDoc())
+                       );
+
+      // Super Admin can edit metadata/spreadsheet/status; Company SPV can edit operational settings & spreadsheet URL
+      allow update: if isSignedIn() &&
+                       isValidId(companyId) &&
+                       isValidCompany(incoming()) &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt && (
+                         (isSuperAdmin() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'name', 'code', 'address', 'phone', 'email',
+                             'spreadsheetId', 'appsScriptUrl', 'connectionStatus',
+                             'subscriptionPlan', 'isActive', 'shrinkageTolerancePct',
+                             'defaultRatePerTon', 'updatedAt'
+                           ])) ||
+                         (isCompanySpv(companyId) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'address', 'phone', 'email', 'spreadsheetId', 'appsScriptUrl',
+                             'connectionStatus', 'shrinkageTolerancePct', 'defaultRatePerTon', 'updatedAt'
+                           ]))
+                       );
+
+      allow delete: if false;
+
+      // --- COMPANY-ISOLATED SUBCOLLECTIONS ---
+      match /customers/{customerId} {
+        allow get: if isValidId(customerId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(customerId) &&
+                         isValidCustomer(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isCompanySpv(companyId) &&
+                         isValidId(customerId) &&
+                         isValidCustomer(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'name', 'code', 'picName', 'phone', 'address',
+                           'loadingLocation', 'unloadingLocation', 'defaultPricePerTon',
+                           'isActive', 'updatedAt'
+                         ]);
+        allow delete: if isCompanySpv(companyId) && isValidId(customerId);
+      }
+
+      match /vehicles/{vehicleId} {
+        allow get: if isValidId(vehicleId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(vehicleId) &&
+                         isValidVehicle(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isValidId(vehicleId) &&
+                         isValidVehicle(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt && (
+                           (isCompanySpv(companyId) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'plateNumber', 'vehicleType', 'capacityTons', 'ownerName',
+                               'status', 'stnkExpiry', 'kirExpiry', 'lastServiceDate',
+                               'isRoadworthy', 'updatedAt'
+                             ])) ||
+                           (isCompanyStaff(companyId) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'status', 'updatedAt'
+                             ]))
+                         );
+        allow delete: if isCompanySpv(companyId) && isValidId(vehicleId);
+      }
+
+      match /drivers/{driverId} {
+        allow get: if isValidId(driverId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(driverId) &&
+                         isValidDriver(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isValidId(driverId) &&
+                         isValidDriver(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt && (
+                           (isCompanySpv(companyId) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'fullName', 'nik', 'phone', 'address', 'simNumber', 'simExpiry',
+                               'assignedVehicleId', 'assignedPlate', 'status', 'totalTrips', 'updatedAt'
+                             ])) ||
+                           (isCompanyStaff(companyId) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'status', 'totalTrips', 'updatedAt'
+                             ]))
+                         );
+        allow delete: if isCompanySpv(companyId) && isValidId(driverId);
+      }
+
+      match /shipments/{shipmentId} {
+        allow get: if isValidId(shipmentId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(shipmentId) &&
+                         isValidShipment(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isValidId(shipmentId) &&
+                         isCompanyStaff(companyId) &&
+                         isValidShipment(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt && (
+                           // SPV can edit, approve, or override even terminal shipments
+                           (callerUser().role == 'SPV' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'doNumber', 'suratJalanNumber', 'shipmentDate', 'customerId', 'customerName',
+                               'loadingLocation', 'unloadingLocation', 'senderCompany', 'receiverCompany',
+                               'productType', 'targetTonnage', 'pricePerTon', 'totalContractValue',
+                               'vehicleId', 'vehiclePlate', 'driverId', 'driverName',
+                               'status', 'etaText', 'notes', 'statusHistory', 'approvedByUid', 'updatedAt'
+                             ])) ||
+                           // Karyawan cannot mutate terminal shipments (COMPLETED / CANCELLED) or self-approve to READY_TO_LOAD
+                           (!(existing().status in ['COMPLETED', 'CANCELLED']) &&
+                             (incoming().status == existing().status || incoming().status != 'READY_TO_LOAD') &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'vehicleId', 'vehiclePlate', 'driverId', 'driverName',
+                               'status', 'etaText', 'notes', 'statusHistory', 'updatedAt'
+                             ]))
+                         );
+        allow delete: if isCompanySpv(companyId) && isValidId(shipmentId);
+      }
+
+      match /weighings/{weighingId} {
+        allow get: if isValidId(weighingId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(weighingId) &&
+                         isValidWeighing(incoming(), companyId) &&
+                         incoming().recordedByUid == request.auth.uid;
+        allow update: if isCompanyStaff(companyId) &&
+                         isValidId(weighingId) &&
+                         isValidWeighing(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().recordedByUid == existing().recordedByUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'loadTicketNumber', 'unloadTicketNumber', 'loadTonnage', 'unloadTonnage',
+                           'differenceTonnage', 'tolerancePct', 'toleranceTons', 'billableTonnage',
+                           'pricePerTon', 'totalDeliveryValue', 'isOverShrinkage', 'updatedAt'
+                         ]);
+        allow delete: if isCompanySpv(companyId) && isValidId(weighingId);
+      }
+
+      match /operational_costs/{costId} {
+        allow get: if isValidId(costId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(costId) &&
+                         isValidOperationalCost(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid &&
+                         (incoming().approvalStatus == 'PENDING' || isCompanySpv(companyId));
+        allow update: if isValidId(costId) &&
+                         isCompanyStaff(companyId) &&
+                         isValidOperationalCost(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt && (
+                           (callerUser().role == 'SPV' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'fuelCost', 'tollCost', 'loadingUnloadingCost', 'serviceCost',
+                               'tripAllowance', 'driverSalary', 'driverCashAdvance', 'additionalCost',
+                               'totalCost', 'revenue', 'grossIncome', 'netIncome',
+                               'approvalStatus', 'approvedByUid', 'notes', 'updatedAt'
+                             ])) ||
+                           (existing().approvalStatus == 'PENDING' &&
+                             incoming().approvalStatus == 'PENDING' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'fuelCost', 'tollCost', 'loadingUnloadingCost', 'serviceCost',
+                               'tripAllowance', 'driverSalary', 'driverCashAdvance', 'additionalCost',
+                               'totalCost', 'revenue', 'grossIncome', 'netIncome', 'notes', 'updatedAt'
+                             ]))
+                         );
+        allow delete: if isCompanySpv(companyId) && isValidId(costId);
+      }
+
+      match /invoices/{invoiceId} {
+        allow get: if isValidId(invoiceId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanySpv(companyId) &&
+                         isValidId(invoiceId) &&
+                         isValidInvoice(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isCompanySpv(companyId) &&
+                         isValidId(invoiceId) &&
+                         isValidInvoice(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'paidAmount', 'paymentStatus', 'dueDate', 'lastPaymentDate',
+                           'paymentMethod', 'notes', 'updatedAt'
+                         ]);
+        allow delete: if isCompanySpv(companyId) && isValidId(invoiceId);
+      }
+
+      match /maintenance/{maintenanceId} {
+        allow get: if isValidId(maintenanceId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(maintenanceId) &&
+                         isValidMaintenance(incoming(), companyId) &&
+                         incoming().createdByUid == request.auth.uid;
+        allow update: if isCompanySpv(companyId) &&
+                         isValidId(maintenanceId) &&
+                         isValidMaintenance(incoming(), companyId) &&
+                         incoming().companyId == existing().companyId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'serviceType', 'serviceDate', 'cost', 'workshopName',
+                           'notes', 'nextServiceDate', 'updatedAt'
+                         ]);
+        allow delete: if isCompanySpv(companyId) && isValidId(maintenanceId);
+      }
+
+      match /activity_logs/{logId} {
+        allow get: if isValidId(logId) && isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow list: if isCompanyStaff(companyId) && existing().companyId == companyId;
+        allow create: if isCompanyStaff(companyId) &&
+                         isValidId(logId) &&
+                         isValidActivityLog(incoming(), companyId) &&
+                         incoming().actorUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // --- COMPANY USERS (USER-TENANT-ROLE BINDINGS) ---
+    match /company_users/{uid} {
+      allow get: if isSignedIn() && isValidId(uid) && (
+        request.auth.uid == uid ||
+        isSuperAdmin() ||
+        (hasCompanyUserDoc() && callerUser().role == 'SPV' && existing().companyId == callerUser().companyId)
+      );
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        existing().userId == request.auth.uid ||
+        (hasCompanyUserDoc() && callerUser().role == 'SPV' && existing().companyId == callerUser().companyId)
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(uid) &&
+                       isValidCompanyUser(incoming()) &&
+                       incoming().userId == uid && (
+                         // 1. Super Admin can provision user profiles
+                         isSuperAdmin() ||
+                         // 2. Bootstrapped Super Admin self-registration
+                         (request.auth.uid == uid &&
+                           incoming().role == 'SUPER_ADMIN' &&
+                           incoming().companyId == 'platform' &&
+                           tokenEmailLower() == 'ua.yosua97@gmail.com' &&
+                           isEmailVerified()) ||
+                         // 3. Invited user claiming a PENDING invite matching verified email, companyId, and role
+                         (request.auth.uid == uid &&
+                           incoming().role in ['SPV', 'KARYAWAN'] &&
+                           isEmailVerified() &&
+                           ('inviteId' in incoming()) &&
+                           incoming().inviteId is string &&
+                           exists(/databases/$(database)/documents/company_invites/$(incoming().inviteId)) &&
+                           get(/databases/$(database)/documents/company_invites/$(incoming().inviteId)).data.email == tokenEmailLower() &&
+                           get(/databases/$(database)/documents/company_invites/$(incoming().inviteId)).data.status == 'PENDING' &&
+                           get(/databases/$(database)/documents/company_invites/$(incoming().inviteId)).data.companyId == incoming().companyId &&
+                           get(/databases/$(database)/documents/company_invites/$(incoming().inviteId)).data.role == incoming().role) ||
+                         // 4. Atomic self-registration as SPV of a brand-new company created in the same batch
+                         (request.auth.uid == uid &&
+                           incoming().role == 'SPV' &&
+                           getAfter(/databases/$(database)/documents/companies/$(incoming().companyId)).data.ownerUid == request.auth.uid)
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(uid) &&
+                       isValidCompanyUser(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().companyId == existing().companyId &&
+                       incoming().createdAt == existing().createdAt && (
+                         // User updating own name/lastLoginAt ONLY (cannot escalate role/status/companyId)
+                         (request.auth.uid == uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'lastLoginAt', 'updatedAt'])) ||
+                         // SPV managing KARYAWAN inside same company
+                         (hasCompanyUserDoc() &&
+                           callerUser().role == 'SPV' &&
+                           callerUser().status == 'ACTIVE' &&
+                           existing().companyId == callerUser().companyId &&
+                           existing().role == 'KARYAWAN' &&
+                           incoming().role == 'KARYAWAN' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt'])) ||
+                         // Super Admin managing SPV/user status
+                         (isSuperAdmin() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'status', 'companyName', 'updatedAt']))
+                       );
+
+      allow delete: if false;
+    }
+
+    // --- COMPANY INVITES ---
+    match /company_invites/{inviteId} {
+      allow get: if isSignedIn() && isValidId(inviteId) && (
+        isSuperAdmin() ||
+        (isEmailVerified() && existing().email == tokenEmailLower()) ||
+        (hasCompanyUserDoc() && callerUser().role == 'SPV' && existing().companyId == callerUser().companyId)
+      );
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isEmailVerified() && existing().email == tokenEmailLower()) ||
+        (hasCompanyUserDoc() && callerUser().role == 'SPV' && existing().companyId == callerUser().companyId)
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       isValidCompanyInvite(incoming()) &&
+                       incoming().invitedByUid == request.auth.uid &&
+                       incoming().status == 'PENDING' && (
+                         isSuperAdmin() ||
+                         (hasCompanyUserDoc() &&
+                           callerUser().role == 'SPV' &&
+                           callerUser().status == 'ACTIVE' &&
+                           callerUser().companyId == incoming().companyId &&
+                           incoming().role == 'KARYAWAN')
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       isValidCompanyInvite(incoming()) &&
+                       incoming().email == existing().email &&
+                       incoming().companyId == existing().companyId &&
+                       incoming().role == existing().role &&
+                       incoming().invitedByUid == existing().invitedByUid &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Invited user accepting their own PENDING invite
+                         (isEmailVerified() &&
+                           existing().email == tokenEmailLower() &&
+                           existing().status == 'PENDING' &&
+                           incoming().status == 'ACCEPTED' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+                         // Super Admin or SPV revoking invite
+                         ((isSuperAdmin() || (hasCompanyUserDoc() && callerUser().role == 'SPV' && existing().companyId == callerUser().companyId)) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                       );
+
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

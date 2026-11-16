@@ -1,0 +1,6 @@
+{
+  "name": "CPO Logistics",
+  "description": "Multi-company Crude Palm Oil (CPO) transportation, fleet, weighing, and operational finance management platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
